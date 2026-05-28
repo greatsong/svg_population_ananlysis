@@ -278,7 +278,7 @@ col4.metric("📈 노령화지수", f"{reg_data['노령화지수']:.1f}")
 col5.metric("🎯 중위 연령", f"만 {int(reg_data['중위연령'])} 세")
 
 # -------------------------------------------------------------------------
-# 🏆 [추가 기능] 고령화 vs 가장 젊은 지역 공간 극단 비교 모델 가동
+# 🏆 고령화 vs 가장 젊은 지역 공간 극단 비교 모델 가동
 # -------------------------------------------------------------------------
 def get_extremes(df_subset, col='고령화비율'):
     if df_subset is None or df_subset.empty or len(df_subset) < 2:
@@ -365,6 +365,7 @@ tab_map, tab_pyramid, tab_compare = st.tabs(["🗺️ 인터랙티브 행정지�
 # 🛠️ 지능형 한국 전국 광역시도 매퍼 (충남, 충북, 전남, 전북 완벽 분할 해결)
 # -----------------------------------------------------------------------------
 def match_national_province_robust(english_id, df_sido):
+    # ID에서 대시, 언더바, do, si 등을 제거하여 소문자 통일
     clean_id = english_id.lower().replace('-', '').replace('_', '').replace('do', '').replace('si', '').replace('special', '').strip()
     
     id_to_term = {
@@ -567,7 +568,6 @@ with tab_map:
                                     val = r_data[selected_metric]
                                     color = get_rgb_color(val, min_val, max_val, selected_theme)
                                     
-                                    # [핵심 교정] 인라인 style 속성을 통째로 강제 덮어씌워 브라우저 강제 채색 유도
                                     path['style'] = f"fill: {color} !important; stroke: #ffffff !important; stroke-width: 1.2px !important;"
                                     
                                     if isinstance(val, (float, np.floating)):
@@ -584,7 +584,7 @@ with tab_map:
             else:
                 st.error("국가 지도 SVG 로딩 실패")
                 
-        # 서울 지도 렌더링
+        # 서울 지도 렌더링 (영등포구 yeoungdeungpo-gu 완벽 예외 패치)
         with map_tab2:
             svg_seoul = fetch_svg("Seoul_districts.svg")
             if svg_seoul:
@@ -607,12 +607,14 @@ with tab_map:
                     soup_s.svg['width'] = '100%'
                     soup_s.svg['height'] = '550px'
                     
+                    # [매핑 교정] yeoungdeungpo, yeongdeungpo 양쪽 스펠링 표기를 전부 영등포구에 매칭
                     seoul_id_mapping = {
                         'jongno': '종로구', 'jung': '중구', 'yongsan': '용산구', 'seongdong': '성동구', 'gwangjin': '광진구',
                         'dongdaemun': '동대문구', 'jungnang': '중랑구', 'seongbuk': '성북구', 'gangbuk': '강북구', 'dobong': '도봉구',
                         'nowon': '노원구', 'eunpyeong': '은평구', 'seodaemun': '서대문구', 'mapo': '마포구', 'yangcheon': '양천구',
-                        'gangseo': '강서구', 'guro': '구로구', 'geumcheon': '금천구', 'yeongdeungpo': '영등포구', 'dongjak': '동작구',
-                        'gwanak': '관악구', 'seocho': '서초구', 'gangnam': '강남구', 'songpa': '송파구', 'gangdong': '강동구'
+                        'gangseo': '강서구', 'guro': '구로구', 'geumcheon': '금천구', 
+                        'yeongdeungpo': '영등포구', 'yeoungdeungpo': '영등포구', # 양방향 예외 처리 완벽 패치!
+                        'dongjak': '동작구', 'gwanak': '관악구', 'seocho': '서초구', 'gangnam': '강남구', 'songpa': '송파구', 'gangdong': '강동구'
                     }
                     
                     for path in soup_s.find_all(['path', 'polygon', 'polyline']):
@@ -627,7 +629,6 @@ with tab_map:
                                 val = r_data[selected_metric]
                                 color = get_rgb_color(val, min_val_s, max_val_s, selected_theme)
                                 
-                                # [핵심 교정] 서울 지도 역시 인라인 style을 강제 주입하여 채색 버그 제거
                                 path['style'] = f"fill: {color} !important; stroke: #ffffff !important; stroke-width: 1.5px !important;"
                                 
                                 if isinstance(val, (float, np.floating)):
@@ -741,39 +742,79 @@ with tab_pyramid:
             st.plotly_chart(fig_donut, use_container_width=True)
 
 # =========================================================================
-# TAB 3: 지역 간 비교 및 랭킹
+# TAB 3: 지역 간 비교 및 랭킹 (젊은 지역 수평 막대그래프 완벽 연동)
 # =========================================================================
 with tab_compare:
     st.subheader("📊 전국 시도 및 시군구 지표 랭킹 비교")
     
-    comp_col1, comp_col2 = st.columns([1, 1])
+    # 1. 전국 광역시도 비교 섹션
+    st.markdown(f"### 🌐 전국 17개 시도별 {selected_label} 비교")
+    df_sido_comp = df_metrics[df_metrics['region_level'] == 'Sido'].copy()
     
-    with comp_col1:
-        st.markdown(f"#### 🏆 전국 17개 시도별 {selected_label} 순위")
-        df_sido_comp = df_metrics[df_metrics['region_level'] == 'Sido'].sort_values(by=selected_metric, ascending=True)
-        
-        fig_sido_bar = px.bar(
-            df_sido_comp, x=selected_metric, y='clean_region',
+    col_sido_old, col_sido_young = st.columns(2)
+    with col_sido_old:
+        st.markdown("##### 🧓 고령화 / 수치 높은 시도 랭킹 (내림차순 정렬)")
+        # 높은 곳이 위로 가도록 정렬
+        df_sido_old = df_sido_comp.sort_values(by=selected_metric, ascending=True)
+        fig_sido_old = px.bar(
+            df_sido_old, x=selected_metric, y='clean_region',
             orientation='h',
             labels={'clean_region': '지역', selected_metric: selected_label},
             color=selected_metric,
             color_continuous_scale=selected_theme
         )
-        fig_sido_bar.update_layout(height=500, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_sido_bar, use_container_width=True)
+        fig_sido_old.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_sido_old, use_container_width=True)
         
-    with comp_col2:
-        st.markdown(f"#### 🔍 서울시 25개 자치구별 {selected_label} 순위")
-        df_seoul_comp = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ")].sort_values(by=selected_metric, ascending=True)
+    with col_sido_young:
+        st.markdown("##### 👶 가장 젊은 / 수치 낮은 시도 랭킹 (오름차순 정렬)")
+        # 젊은 곳이 위로 가도록 정렬
+        df_sido_young = df_sido_comp.sort_values(by=selected_metric, ascending=False)
+        # 젊은 분위기를 대변하기 위해 Blues 등 반대되는 색상 테마 자동 대조
+        reverse_theme = "Blues" if selected_theme != "Blues" else "Reds"
+        fig_sido_young = px.bar(
+            df_sido_young, x=selected_metric, y='clean_region',
+            orientation='h',
+            labels={'clean_region': '지역', selected_metric: selected_label},
+            color=selected_metric,
+            color_continuous_scale=reverse_theme
+        )
+        fig_sido_young.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_sido_young, use_container_width=True)
         
-        df_seoul_comp['short_name'] = df_seoul_comp['clean_region'].apply(lambda x: x.split()[-1])
-        
-        fig_seoul_bar = px.bar(
-            df_seoul_comp, x=selected_metric, y='short_name',
+    st.markdown("---")
+    
+    # 2. 서울 자치구 비교 섹션
+    st.markdown(f"### 🏙️ 서울시 25개 자치구별 {selected_label} 비교")
+    df_seoul_comp = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ")].copy()
+    df_seoul_comp['short_name'] = df_seoul_comp['clean_region'].apply(lambda x: x.split()[-1])
+    
+    col_seoul_old, col_seoul_young = st.columns(2)
+    with col_seoul_old:
+        st.markdown("##### 🧓 고령화 / 수치 가장 높은 자치구 Top 15")
+        df_seoul_old = df_seoul_comp.sort_values(by=selected_metric, ascending=False).head(15)
+        # 역정렬을 통해 높은 지역이 시각적으로 맨 위 수평선에 오도록 조정
+        df_seoul_old = df_seoul_old.iloc[::-1]
+        fig_seoul_old = px.bar(
+            df_seoul_old, x=selected_metric, y='short_name',
             orientation='h',
             labels={'short_name': '자치구', selected_metric: selected_label},
             color=selected_metric,
             color_continuous_scale=selected_theme
         )
-        fig_seoul_bar.update_layout(height=500, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_seoul_bar, use_container_width=True)
+        fig_seoul_old.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_seoul_old, use_container_width=True)
+        
+    with col_seoul_young:
+        st.markdown("##### 👶 가장 젊은 / 수치 가장 낮은 자치구 Top 15")
+        df_seoul_young = df_seoul_comp.sort_values(by=selected_metric, ascending=True).head(15)
+        df_seoul_young = df_seoul_young.iloc[::-1]
+        fig_seoul_young = px.bar(
+            df_seoul_young, x=selected_metric, y='short_name',
+            orientation='h',
+            labels={'short_name': '자치구', selected_metric: selected_label},
+            color=selected_metric,
+            color_continuous_scale=reverse_theme
+        )
+        fig_seoul_young.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_seoul_young, use_container_width=True)
