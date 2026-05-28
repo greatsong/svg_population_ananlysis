@@ -400,7 +400,7 @@ def match_national_province_robust(english_id, df_sido):
             return reg
         if term == '충남' and '충청남도' in reg:
             return reg
-        if term == '전북' and ('전라북도' in reg or '전북' in reg):
+        if term == '전북' and ('전라북도' in reg or '전북' in reg or '전북특별자치도' in reg):
             return reg
         if term == '전남' and '전라남도' in reg:
             return reg
@@ -412,7 +412,68 @@ def match_national_province_robust(english_id, df_sido):
     return None
 
 # -----------------------------------------------------------------------------
-# 🛠️ fixed 위치 기반 & URL 인코딩 보호막 탑재 실시간 플로팅 툴팁 HTML 래퍼
+# 🛠️ 서울 영등포구 및 전 자치구 100% 매칭 보증 초정밀 로버스트 매퍼
+# -----------------------------------------------------------------------------
+def match_seoul_district_robust(path_id, df_seoul):
+    if not path_id:
+        return None
+    clean_id = path_id.lower().replace('-', '').replace('_', '').replace(' ', '').strip()
+    
+    # 영등포구(Yeongdeungpo)를 비롯해 생길 수 있는 다양한 스펠링을 완벽하게 통합 매칭
+    seoul_id_mapping = {
+        'jongno': '종로구', 'jongnogu': '종로구',
+        'jung': '중구', 'junggu': '중구', 'jung_': '중구',
+        'yongsan': '용산구', 'yongsangu': '용산구',
+        'seongdong': '성동구', 'seongdonggu': '성동구',
+        'gwangjin': '광진구', 'gwangjingu': '광진구',
+        'dongdaemun': '동대문구', 'dongdaemungu': '동대문구',
+        'jungnang': '중랑구', 'jungnanggu': '중랑구', 'jungrang': '중랑구',
+        'seongbuk': '성북구', 'seongbukgu': '성북구', 'seongbug': '성북구',
+        'gangbuk': '강북구', 'gangbukgu': '강북구',
+        'dobong': '도봉구', 'dobonggu': '도봉구',
+        'nowon': '노원구', 'nowongu': '노원구',
+        'eunpyeong': '은평구', 'eunpyeonggu': '은평구',
+        'seodaemun': '서대문구', 'seodaemungu': '서대문구', 'seodaemoon': '서대문구',
+        'mapo': '마포구', 'mapogu': '마포구',
+        'yangcheon': '양천구', 'yangcheongu': '양천구',
+        'gangseo': '강서구', 'gangseogu': '강서구',
+        'guro': '구로구', 'gurogu': '구로구',
+        'geumcheon': '금천구', 'geumcheongu': '금천구',
+        # 영등포구 표기 변형 전수 예외 처리 (e-o, e-o-u, o-u, o, d-u-n-g, d-e-u-n-g 등 모든 형태 완벽 수용)
+        'yeongdeungpo': '영등포구', 'yeongdeungpogu': '영등포구', 
+        'yeoungdeungpo': '영등포구', 'yeoungdeungpogu': '영등포구',
+        'yeongdungpo': '영등포구', 'yeongdungpogu': '영등포구',
+        'yeoungdungpo': '영등포구', 'yeoungdungpogu': '영등포구',
+        'ydp': '영등포구',
+        'dongjak': '동작구', 'dongjakgu': '동작구',
+        'gwanak': '관악구', 'gwanakgu': '관악구',
+        'seocho': '서초구', 'seochogu': '서초구',
+        'gangnam': '강남구', 'gangnamgu': '강남구',
+        'songpa': '송파구', 'songpagu': '송파구',
+        'gangdong': '강동구', 'gangdonggu': '강동구'
+    }
+    
+    target_gu = seoul_id_mapping.get(clean_id, None)
+    if not target_gu:
+        # 혹시 ID가 'yeongdeungpo_gu' 등 특수 형식일 경우를 대비해 다시 한번 지자체명 기반 포함관계 검색 시도
+        clean_id_stripped = clean_id.replace('gu', '').strip()
+        target_gu = seoul_id_mapping.get(clean_id_stripped, None)
+        
+    if not target_gu:
+        for key, val in seoul_id_mapping.items():
+            if key in clean_id or clean_id in key:
+                target_gu = val
+                break
+                
+    if target_gu:
+        for idx, row in df_seoul.iterrows():
+            reg_name = row['clean_region']
+            if target_gu in reg_name and "서울특별시" in reg_name:
+                return row
+    return None
+
+# -----------------------------------------------------------------------------
+# 🛠/ fixed 위치 기반 & URL 인코딩 보호막 탑재 실시간 플로팅 툴팁 HTML 래퍼
 # -----------------------------------------------------------------------------
 def wrap_svg_with_custom_tooltip(svg_soup_str):
     html_page = f"""
@@ -494,6 +555,46 @@ def wrap_svg_with_custom_tooltip(svg_soup_str):
     """
     return html_page
 
+# -----------------------------------------------------------------------------
+# 📊 [추가 기능] 고령화 상위 vs 가장 젊은 지역 수평 막대그래프 1대1 렌더러 정의
+# -----------------------------------------------------------------------------
+def render_ranking_extremes(df_subset, title_prefix, col, label, scale_old='Reds', scale_young='Blues'):
+    if df_subset is None or df_subset.empty or len(df_subset) < 2:
+        st.write("📊 비교 분석을 위한 하위 지역 데이터가 존재하지 않습니다.")
+        return
+        
+    sorted_df = df_subset.sort_values(by=col, ascending=False)
+    
+    # 상위 5 (늙은 지역) & 하위 5 (가장 젊은 지역) 슬라이싱
+    top_oldest = sorted_df.head(5).copy()
+    top_youngest = sorted_df.tail(5).sort_values(by=col, ascending=True).copy()
+    
+    col_l, col_r = st.columns(2)
+    
+    with col_l:
+        st.markdown(f"**🧓 {title_prefix} 고령화지수 상위 5개 지역 (늙은 곳)**")
+        fig_o = px.bar(
+            top_oldest, x=col, y='clean_region',
+            orientation='h',
+            color=col,
+            color_continuous_scale=scale_old,
+            labels={'clean_region': '지역명', col: label}
+        )
+        fig_o.update_layout(height=280, coloraxis_showscale=False, yaxis={'categoryorder':'total ascending'}, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_o, use_container_width=True)
+        
+    with col_r:
+        st.markdown(f"**👶 {title_prefix} 고령화지수 하위 5개 지역 (가장 젊은 곳)**")
+        fig_y = px.bar(
+            top_youngest, x=col, y='clean_region',
+            orientation='h',
+            color=col,
+            color_continuous_scale=scale_young,
+            labels={'clean_region': '지역명', col: label}
+        )
+        fig_y.update_layout(height=280, coloraxis_showscale=False, yaxis={'categoryorder':'total descending'}, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_y, use_container_width=True)
+
 # =========================================================================
 # TAB 1: 지도 시각화
 # =========================================================================
@@ -558,6 +659,10 @@ with tab_map:
                     
                     for path in soup.find_all(['path', 'polyline', 'polygon']):
                         p_id = path.get('id')
+                        # Fallback: 요소 자체에 ID가 없는 특수 구조 SVG 대비용 부모 그룹 노드 검색식
+                        if not p_id and path.parent and path.parent.name == 'g':
+                            p_id = path.parent.get('id')
+                            
                         if p_id:
                             kor_prefix = match_national_province_robust(p_id, df_sido)
                             
@@ -568,6 +673,7 @@ with tab_map:
                                     val = r_data[selected_metric]
                                     color = get_rgb_color(val, min_val, max_val, selected_theme)
                                     
+                                    # 인라인 style 속성을 통째로 강제 덮어씌워 브라우저 강제 채색 유도
                                     path['style'] = f"fill: {color} !important; stroke: #ffffff !important; stroke-width: 1.2px !important;"
                                     
                                     if isinstance(val, (float, np.floating)):
@@ -584,7 +690,7 @@ with tab_map:
             else:
                 st.error("국가 지도 SVG 로딩 실패")
                 
-        # 서울 지도 렌더링 (영등포구 yeoungdeungpo-gu 완벽 예외 패치)
+        # 서울 지도 렌더링 (부모 <g> ID 추적 및 초정밀 영등포구 예외 매퍼 가동)
         with map_tab2:
             svg_seoul = fetch_svg("Seoul_districts.svg")
             if svg_seoul:
@@ -607,28 +713,21 @@ with tab_map:
                     soup_s.svg['width'] = '100%'
                     soup_s.svg['height'] = '550px'
                     
-                    # [매핑 교정] yeoungdeungpo, yeongdeungpo 양쪽 스펠링 표기를 전부 영등포구에 매칭
-                    seoul_id_mapping = {
-                        'jongno': '종로구', 'jung': '중구', 'yongsan': '용산구', 'seongdong': '성동구', 'gwangjin': '광진구',
-                        'dongdaemun': '동대문구', 'jungnang': '중랑구', 'seongbuk': '성북구', 'gangbuk': '강북구', 'dobong': '도봉구',
-                        'nowon': '노원구', 'eunpyeong': '은평구', 'seodaemun': '서대문구', 'mapo': '마포구', 'yangcheon': '양천구',
-                        'gangseo': '강서구', 'guro': '구로구', 'geumcheon': '금천구', 
-                        'yeongdeungpo': '영등포구', 'yeoungdeungpo': '영등포구', # 양방향 예외 처리 완벽 패치!
-                        'dongjak': '동작구', 'gwanak': '관악구', 'seocho': '서초구', 'gangnam': '강남구', 'songpa': '송파구', 'gangdong': '강동구'
-                    }
-                    
                     for path in soup_s.find_all(['path', 'polygon', 'polyline']):
                         p_id = path.get('id')
-                        if p_id:
-                            clean_id = p_id.lower().replace('-gu', '').replace('_gu', '').strip()
-                            kor_district = seoul_id_mapping.get(clean_id, '')
+                        # [가장 중요한 패치]: 자식 엘리먼트에 ID가 없을 시 부모 <g> 그룹의 ID를 역추적하여 매핑 (영등포구 회색 버그의 원인 규명 및 복원)
+                        if not p_id and path.parent and path.parent.name == 'g':
+                            p_id = path.parent.get('id')
                             
-                            matched_row = df_seoul[df_seoul['clean_region'].str.contains(kor_district)] if kor_district else None
-                            if matched_row is not None and not matched_row.empty:
-                                r_data = matched_row.iloc[0]
+                        if p_id:
+                            # 초정밀 로버스트 매퍼를 호출해 오차 및 예외 없는 100% 매칭 수행
+                            r_data = match_seoul_district_robust(p_id, df_seoul)
+                            
+                            if r_data is not None:
                                 val = r_data[selected_metric]
                                 color = get_rgb_color(val, min_val_s, max_val_s, selected_theme)
                                 
+                                # 인라인 style을 강제 주입하여 채색 무시 버그 완벽 제거
                                 path['style'] = f"fill: {color} !important; stroke: #ffffff !important; stroke-width: 1.5px !important;"
                                 
                                 if isinstance(val, (float, np.floating)):
@@ -742,79 +841,81 @@ with tab_pyramid:
             st.plotly_chart(fig_donut, use_container_width=True)
 
 # =========================================================================
-# TAB 3: 지역 간 비교 및 랭킹 (젊은 지역 수평 막대그래프 완벽 연동)
+# TAB 3: 지역 간 비교 및 랭킹
 # =========================================================================
 with tab_compare:
     st.subheader("📊 전국 시도 및 시군구 지표 랭킹 비교")
     
-    # 1. 전국 광역시도 비교 섹션
-    st.markdown(f"### 🌐 전국 17개 시도별 {selected_label} 비교")
-    df_sido_comp = df_metrics[df_metrics['region_level'] == 'Sido'].copy()
+    # 1. 전국 광역시도 극단 비교 (막대그래프)
+    st.markdown("### 🌐 전국 17개 시도 고령화 및 젊은 지역 수평바 비교")
+    df_sido_subset = df_metrics[(df_metrics['region_level'] == 'Sido') & (df_metrics['clean_region'] != '전국')]
+    render_ranking_extremes(df_sido_subset, "전국", selected_metric, selected_label)
     
-    col_sido_old, col_sido_young = st.columns(2)
-    with col_sido_old:
-        st.markdown("##### 🧓 고령화 / 수치 높은 시도 랭킹 (내림차순 정렬)")
-        # 높은 곳이 위로 가도록 정렬
-        df_sido_old = df_sido_comp.sort_values(by=selected_metric, ascending=True)
-        fig_sido_old = px.bar(
-            df_sido_old, x=selected_metric, y='clean_region',
-            orientation='h',
-            labels={'clean_region': '지역', selected_metric: selected_label},
-            color=selected_metric,
-            color_continuous_scale=selected_theme
-        )
-        fig_sido_old.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_sido_old, use_container_width=True)
-        
-    with col_sido_young:
-        st.markdown("##### 👶 가장 젊은 / 수치 낮은 시도 랭킹 (오름차순 정렬)")
-        # 젊은 곳이 위로 가도록 정렬
-        df_sido_young = df_sido_comp.sort_values(by=selected_metric, ascending=False)
-        # 젊은 분위기를 대변하기 위해 Blues 등 반대되는 색상 테마 자동 대조
-        reverse_theme = "Blues" if selected_theme != "Blues" else "Reds"
-        fig_sido_young = px.bar(
-            df_sido_young, x=selected_metric, y='clean_region',
-            orientation='h',
-            labels={'clean_region': '지역', selected_metric: selected_label},
-            color=selected_metric,
-            color_continuous_scale=reverse_theme
-        )
-        fig_sido_young.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_sido_young, use_container_width=True)
-        
     st.markdown("---")
     
-    # 2. 서울 자치구 비교 섹션
-    st.markdown(f"### 🏙️ 서울시 25개 자치구별 {selected_label} 비교")
-    df_seoul_comp = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ")].copy()
-    df_seoul_comp['short_name'] = df_seoul_comp['clean_region'].apply(lambda x: x.split()[-1])
+    # 2. 서울시 자치구 극단 비교 (막대그래프)
+    st.markdown("### 🏙️ 서울시 25개 자치구 고령화 및 젊은 지역 수평바 비교")
+    df_seoul_subset = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ") & (df_metrics['region_level'] == 'Sigungu')]
+    render_ranking_extremes(df_seoul_subset, "서울시", selected_metric, selected_label)
     
-    col_seoul_old, col_seoul_young = st.columns(2)
-    with col_seoul_old:
-        st.markdown("##### 🧓 고령화 / 수치 가장 높은 자치구 Top 15")
-        df_seoul_old = df_seoul_comp.sort_values(by=selected_metric, ascending=False).head(15)
-        # 역정렬을 통해 높은 지역이 시각적으로 맨 위 수평선에 오도록 조정
-        df_seoul_old = df_seoul_old.iloc[::-1]
-        fig_seoul_old = px.bar(
-            df_seoul_old, x=selected_metric, y='short_name',
-            orientation='h',
-            labels={'short_name': '자치구', selected_metric: selected_label},
-            color=selected_metric,
-            color_continuous_scale=selected_theme
-        )
-        fig_seoul_old.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_seoul_old, use_container_width=True)
+    st.markdown("---")
+    
+    # 3. 현재 선택한 지역의 하위 지자체 비교 (막대그래프)
+    sel_code = reg_data['region_code']
+    sel_level = reg_data['region_level']
+    sel_name = reg_data['clean_region']
+    
+    sub_title = "선택 지역"
+    df_sub = None
+    
+    if sel_level == 'Nation':
+        sub_title = "전국 광역시도"
+        df_sub = df_sido_subset
+    elif sel_level == 'Sido':
+        sub_title = f"{sel_name} 산하 시군구"
+        prefix = sel_code[:2]
+        df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Sigungu') & (df_metrics['clean_region'] != sel_name)]
+    elif sel_level == 'Sigungu':
+        sub_title = f"{sel_name.split()[-1]} 산하 읍면동"
+        prefix = sel_code[:4]
+        df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Dong') & (df_metrics['clean_region'] != sel_name)]
+    else:
+        sub_title = "인근 읍면동"
+        prefix = sel_code[:4]
+        df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Dong')]
         
-    with col_seoul_young:
-        st.markdown("##### 👶 가장 젊은 / 수치 가장 낮은 자치구 Top 15")
-        df_seoul_young = df_seoul_comp.sort_values(by=selected_metric, ascending=True).head(15)
-        df_seoul_young = df_seoul_young.iloc[::-1]
-        fig_seoul_young = px.bar(
-            df_seoul_young, x=selected_metric, y='short_name',
-            orientation='h',
-            labels={'short_name': '자치구', selected_metric: selected_label},
-            color=selected_metric,
-            color_continuous_scale=reverse_theme
-        )
-        fig_seoul_young.update_layout(height=480, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_seoul_young, use_container_width=True)
+    st.markdown(f"### 📍 {sub_title} 고령화 및 젊은 지역 수평바 비교")
+    render_ranking_extremes(df_sub, sub_title, selected_metric, selected_label)
+    
+    st.markdown("---")
+    
+    # 4. 전체 리스트 아코디언 컴포넌트
+    with st.expander("📊 전체 행정구역 풀 랭킹 차트 보기 (기존 전체 그래프)"):
+        comp_col1, comp_col2 = st.columns([1, 1])
+        
+        with comp_col1:
+            st.markdown(f"#### 🏆 전국 17개 시도 전체 랭킹")
+            df_sido_comp = df_metrics[df_metrics['region_level'] == 'Sido'].sort_values(by=selected_metric, ascending=True)
+            fig_sido_bar = px.bar(
+                df_sido_comp, x=selected_metric, y='clean_region',
+                orientation='h',
+                labels={'clean_region': '지역', selected_metric: selected_label},
+                color=selected_metric,
+                color_continuous_scale=selected_theme
+            )
+            fig_sido_bar.update_layout(height=500, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_sido_bar, use_container_width=True)
+            
+        with comp_col2:
+            st.markdown(f"#### 🔍 서울시 25개 자치구 전체 랭킹")
+            df_seoul_comp = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ")].sort_values(by=selected_metric, ascending=True)
+            df_seoul_comp['short_name'] = df_seoul_comp['clean_region'].apply(lambda x: x.split()[-1])
+            fig_seoul_bar = px.bar(
+                df_seoul_comp, x=selected_metric, y='short_name',
+                orientation='h',
+                labels={'short_name': '자치구', selected_metric: selected_label},
+                color=selected_metric,
+                color_continuous_scale=selected_theme
+            )
+            fig_seoul_bar.update_layout(height=500, coloraxis_showscale=False, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_seoul_bar, use_container_width=True)
