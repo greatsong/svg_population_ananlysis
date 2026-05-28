@@ -284,7 +284,7 @@ def get_extremes(df_subset, col='고령화비율'):
     if df_subset is None or df_subset.empty or len(df_subset) < 2:
         return None, None
     sorted_df = df_subset.sort_values(by=col)
-    return sorted_df.iloc[-1], sorted_df.iloc[0] # [가장 늙은 지역(Max), 가장 젊은 지역(Min)]
+    return sorted_df.iloc[-1], sorted_df.iloc[0] # [가장 고령인 곳(Max), 가장 젊은 곳(Min)]
 
 st.markdown("### 🏆 지역별 극단 인구 비교 (가장 고령화된 곳 🧓 vs 가장 젊은 곳 👶)")
 ext_col1, ext_col2, ext_col3 = st.columns(3)
@@ -317,7 +317,7 @@ with ext_col2:
         st.caption("데이터 부족")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 3. 현재 선택한 지역의 하위 지자체(또는 인근 구역) 비교
+# 3. 현재 선택한 지역의 하위 지자체 비교
 with ext_col3:
     st.markdown("<div style='background-color:#1c1f26; padding:15px; border-radius:10px; border:1px solid #383e4c;'>", unsafe_allow_html=True)
     
@@ -340,7 +340,6 @@ with ext_col3:
         prefix = sel_code[:4]
         df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Dong') & (df_metrics['clean_region'] != sel_name)]
     else:
-        # 읍면동인 경우 같은 구/군 내의 다른 읍면동끼리 비교
         sub_title = f"📍 인근 읍면동 간 비교"
         prefix = sel_code[:4]
         df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Dong')]
@@ -366,7 +365,6 @@ tab_map, tab_pyramid, tab_compare = st.tabs(["🗺️ 인터랙티브 행정지�
 # 🛠️ 지능형 한국 전국 광역시도 매퍼 (충남, 충북, 전남, 전북 완벽 분할 해결)
 # -----------------------------------------------------------------------------
 def match_national_province_robust(english_id, df_sido):
-    # ID에서 대시, 언더바, do, si 등을 제거하여 소문자 통일
     clean_id = english_id.lower().replace('-', '').replace('_', '').replace('do', '').replace('si', '').replace('special', '').strip()
     
     id_to_term = {
@@ -569,9 +567,8 @@ with tab_map:
                                     val = r_data[selected_metric]
                                     color = get_rgb_color(val, min_val, max_val, selected_theme)
                                     
-                                    path['fill'] = color
-                                    path['stroke'] = '#ffffff'
-                                    path['stroke-width'] = '1.2px'
+                                    # [핵심 교정] 인라인 style 속성을 통째로 강제 덮어씌워 브라우저 강제 채색 유도
+                                    path['style'] = f"fill: {color} !important; stroke: #ffffff !important; stroke-width: 1.2px !important;"
                                     
                                     if isinstance(val, (float, np.floating)):
                                         formatted_val = f"{val:.2f}"
@@ -630,9 +627,8 @@ with tab_map:
                                 val = r_data[selected_metric]
                                 color = get_rgb_color(val, min_val_s, max_val_s, selected_theme)
                                 
-                                path['fill'] = color
-                                path['stroke'] = '#ffffff'
-                                path['stroke-width'] = '1.5px'
+                                # [핵심 교정] 서울 지도 역시 인라인 style을 강제 주입하여 채색 버그 제거
+                                path['style'] = f"fill: {color} !important; stroke: #ffffff !important; stroke-width: 1.5px !important;"
                                 
                                 if isinstance(val, (float, np.floating)):
                                     formatted_val = f"{val:.2f}"
