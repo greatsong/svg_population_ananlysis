@@ -4,8 +4,8 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import requests
-import json
 import re
+import urllib.parse
 from bs4 import BeautifulSoup
 
 # 페이지 설정
@@ -15,6 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 타이틀 및 설명
 st.title("📊 대한민국 지역별 인구구조 및 노령화·청소년 분석 대시보드")
 st.markdown("행정안전부 주민등록 인구통계 데이터를 기반으로 고령화 비율, 청소년 인구 비율, 성비 등 핵심 지표를 정밀하게 시각화합니다.")
 
@@ -42,32 +43,25 @@ def load_and_preprocess_data(file_path_or_buffer):
     df['region_code'] = df[reg_col].apply(lambda x: re.search(r'\((\d+)\)', str(x)).group(1) if re.search(r'\((\d+)\)', str(x)) else '0000000000')
     df['clean_region'] = df[reg_col].apply(lambda x: x.split('(')[0].strip() if isinstance(x, str) else str(x))
     
-    # 행정구역 코드 체계를 통한 지역 레벨 분류 (코드 체계 부재 시 예외처리 포함)
-    def classify_level(row):
+    # 지능형 광역시도/시군구/읍면동 레벨 분류기
+    def get_level(row):
         code = row['region_code']
-        name = row['clean_region']
-        if code != '0000000000':
-            if code == '0000000000' or name == '전국':
-                return 'Nation'
-            elif code.endswith('00000000'):
-                return 'Sido'
-            elif code.endswith('00000'):
-                return 'Sigungu'
-            else:
-                return 'Dong'
+        region = row['clean_region']
+        if code == '0000000000' or '전국' in region:
+            return 'Nation'
+        sidos = [
+            "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", 
+            "세종특별자치시", "경기도", "강원도", "강원특별자치도", "충청북도", "충청남도", 
+            "전라북도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도"
+        ]
+        if region in sidos or code.endswith('00000000'):
+            return 'Sido'
+        elif code.endswith('00000') or (" " in region and len(region.split()) == 2):
+            return 'Sigungu'
         else:
-            # 코드가 없는 구버전 CSV 등일 때 명칭 패턴 분석
-            if name in ['전국', '합계']:
-                return 'Nation'
-            sido_list = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원도", "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도", "제주특별자치도", "강원특별자치도", "전북특별자치도"]
-            if name in sido_list or name.endswith('도') or name.endswith('특별시') or name.endswith('광역시') or name.endswith('특별자치시') or name.endswith('특별자치도'):
-                return 'Sido'
-            elif name.endswith('구') or name.endswith('시') or name.endswith('군'):
-                return 'Sigungu'
-            else:
-                return 'Dong'
+            return 'Dong'
             
-    df['region_level'] = df.apply(classify_level, axis=1)
+    df['region_level'] = df.apply(get_level, axis=1)
     
     # 쉼표(,) 제거 및 숫자 변환
     for col in df.columns:
@@ -172,7 +166,7 @@ def fetch_svg(filename):
 
 # 가상 데이터 빌더 (파일 없을 시 작동 방지용)
 def get_mock_population_data():
-    regions = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원도", "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도", "제주특별자치도"]
+    regions = ["전국", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원도", "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도", "제주특별자치도"]
     seoul_districts = ["종로구", "중구", "용산구", "성동구", "광진구", "동대문구", "중랑구", "성북구", "강북구", "도봉구", "노원구", "은평구", "서대문구", "마포구", "양천구", "강서구", "구로구", "금천구", "영등포구", "동작구", "관악구", "서초구", "강남구", "송파구", "강동구"]
     
     data = []
@@ -181,11 +175,11 @@ def get_mock_population_data():
     for r in regions:
         tot = random.randint(1000000, 13000000) if "경기" in r else random.randint(300000, 3400000)
         data.append({
-            'clean_region': r, 'region_code': '1100000000', 'region_level': 'Sido',
+            'clean_region': r, 'region_code': '1100000000', 'region_level': 'Sido' if r != "전국" else "Nation",
             '총인구': tot, '남성인구': int(tot*0.49), '여성인구': int(tot*0.51),
             '유소년인구_14': int(tot*0.11), '청소년인구_18': int(tot*0.15),
             '생산가능인구': int(tot*0.70), '고령인구': int(tot*0.19),
-            '고령화비율': random.uniform(14.0, 25.0), '청소년비율': random.uniform(10.0, 18.0),
+            '고령화비율': random.uniform(14.0, 25.0) if r != "전국" else 18.5, '청소년비율': random.uniform(10.0, 18.0),
             '생산가능인구비율': random.uniform(65.0, 74.0), '노령화지수': random.uniform(110.0, 220.0),
             '성비': random.uniform(95.0, 102.0), '중위연령': random.randint(42, 51),
             'raw_row': None, 'male_cols': {}, 'female_cols': {}, 'ages': []
@@ -221,7 +215,7 @@ else:
     st.sidebar.warning("⚠️ CSV 파일이 없습니다. 가상 시뮬레이션 데이터를 불러옵니다.")
 
 # -----------------------------------------------------------------------------
-# 4. 분석 엔진 및 메인 대시보드 가동
+# 4. 분석 엔진 및 메인 대시보드
 # -----------------------------------------------------------------------------
 if raw_data is not None:
     df_metrics = calculate_demographics(raw_data)
@@ -264,6 +258,7 @@ selected_region = st.sidebar.selectbox("상세 분석을 원하는 지역을 선
 # -------------------------------------------------------------------------
 reg_data = df_metrics[df_metrics['clean_region'] == selected_region].iloc[0]
 
+# 고령화 사회 등급 판정
 ratio = reg_data['고령화비율']
 if ratio >= 20.0:
     stage = "🔴 초고령사회"
@@ -282,207 +277,231 @@ col3.metric("🧒 청소년 비중 (0~18세)", f"{reg_data['청소년비율']:.2
 col4.metric("📈 노령화지수", f"{reg_data['노령화지수']:.1f}")
 col5.metric("🎯 중위 연령", f"만 {int(reg_data['중위연령'])} 세")
 
+# -------------------------------------------------------------------------
+# 🏆 [추가 기능] 고령화 vs 가장 젊은 지역 공간 극단 비교 모델 가동
+# -------------------------------------------------------------------------
+def get_extremes(df_subset, col='고령화비율'):
+    if df_subset is None or df_subset.empty or len(df_subset) < 2:
+        return None, None
+    sorted_df = df_subset.sort_values(by=col)
+    return sorted_df.iloc[-1], sorted_df.iloc[0] # [가장 늙은 지역(Max), 가장 젊은 지역(Min)]
+
+st.markdown("### 🏆 지역별 극단 인구 비교 (가장 고령화된 곳 🧓 vs 가장 젊은 곳 👶)")
+ext_col1, ext_col2, ext_col3 = st.columns(3)
+
+# 1. 전국 광역시도 비교
+with ext_col1:
+    st.markdown("<div style='background-color:#1c1f26; padding:15px; border-radius:10px; border:1px solid #383e4c;'>", unsafe_allow_html=True)
+    st.markdown("##### 🌐 전국 17개 시도 최고 vs 최저")
+    df_sido_subset = df_metrics[(df_metrics['region_level'] == 'Sido') & (df_metrics['clean_region'] != '전국')]
+    oldest_sido, youngest_sido = get_extremes(df_sido_subset, '고령화비율')
+    
+    if oldest_sido is not None:
+        st.markdown(f"🧓 **최고 고령:** `{oldest_sido['clean_region']}`  \n└ 고령화율: **{oldest_sido['고령화비율']:.1f}%** (만 {int(oldest_sido['중위연령'])}세)")
+        st.markdown(f"👶 **가장 젊음:** `{youngest_sido['clean_region']}`  \n└ 고령화율: **{youngest_sido['고령화비율']:.1f}%** (만 {int(youngest_sido['중위연령'])}세)")
+    else:
+        st.caption("데이터 부족")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# 2. 서울시 구별 비교
+with ext_col2:
+    st.markdown("<div style='background-color:#1c1f26; padding:15px; border-radius:10px; border:1px solid #383e4c;'>", unsafe_allow_html=True)
+    st.markdown("##### 🏙️ 서울시 25개 구 최고 vs 최저")
+    df_seoul_subset = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ") & (df_metrics['region_level'] == 'Sigungu')]
+    oldest_seoul, youngest_seoul = get_extremes(df_seoul_subset, '고령화비율')
+    
+    if oldest_seoul is not None:
+        st.markdown(f"🧓 **최고 고령:** `{oldest_seoul['clean_region'].split()[-1]}`  \n└ 고령화율: **{oldest_seoul['고령화비율']:.1f}%** (만 {int(oldest_seoul['중위연령'])}세)")
+        st.markdown(f"👶 **가장 젊음:** `{youngest_seoul['clean_region'].split()[-1]}`  \n└ 고령화율: **{youngest_seoul['고령화비율']:.1f}%** (만 {int(youngest_seoul['중위연령'])}세)")
+    else:
+        st.caption("데이터 부족")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# 3. 현재 선택한 지역의 하위 지자체(또는 인근 구역) 비교
+with ext_col3:
+    st.markdown("<div style='background-color:#1c1f26; padding:15px; border-radius:10px; border:1px solid #383e4c;'>", unsafe_allow_html=True)
+    
+    sel_code = reg_data['region_code']
+    sel_level = reg_data['region_level']
+    sel_name = reg_data['clean_region']
+    
+    sub_title = "📍 선택 지역 비교"
+    df_sub = None
+    
+    if sel_level == 'Nation':
+        sub_title = "📍 전국 광역시도 비교"
+        df_sub = df_sido_subset
+    elif sel_level == 'Sido':
+        sub_title = f"📍 {sel_name} 산하 시군구 비교"
+        prefix = sel_code[:2]
+        df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Sigungu') & (df_metrics['clean_region'] != sel_name)]
+    elif sel_level == 'Sigungu':
+        sub_title = f"📍 {sel_name.split()[-1]} 산하 읍면동 비교"
+        prefix = sel_code[:4]
+        df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Dong') & (df_metrics['clean_region'] != sel_name)]
+    else:
+        # 읍면동인 경우 같은 구/군 내의 다른 읍면동끼리 비교
+        sub_title = f"📍 인근 읍면동 간 비교"
+        prefix = sel_code[:4]
+        df_sub = df_metrics[(df_metrics['region_code'].str.startswith(prefix)) & (df_metrics['region_level'] == 'Dong')]
+
+    st.markdown(f"##### {sub_title}")
+    oldest_sub, youngest_sub = get_extremes(df_sub, '고령화비율')
+    
+    if oldest_sub is not None:
+        name_o = oldest_sub['clean_region'].split()[-1]
+        name_y = youngest_sub['clean_region'].split()[-1]
+        st.markdown(f"🧓 **최고 고령:** `{name_o}`  \n└ 고령화율: **{oldest_sub['고령화비율']:.1f}%** (만 {int(oldest_sub['중위연령'])}세)")
+        st.markdown(f"👶 **가장 젊음:** `{name_y}`  \n└ 고령화율: **{youngest_sub['고령화비율']:.1f}%** (만 {int(youngest_sub['중위연령'])}세)")
+    else:
+        st.caption("하위 행정구역 데이터가 없습니다.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
 st.markdown("---")
 
 # 메인 레이아웃 탭 분할
 tab_map, tab_pyramid, tab_compare = st.tabs(["🗺️ 인터랙티브 행정지도", "📊 세부 연령 구조 (피라미드)", "📈 지역 간 비교 및 랭킹"])
 
 # -----------------------------------------------------------------------------
-# 🛠️ 전국 시도 및 서울시 자치구 ID 완벽 매핑용 전수조사 다변 맵 사전 정의
+# 🛠️ 지능형 한국 전국 광역시도 매퍼 (충남, 충북, 전남, 전북 완벽 분할 해결)
 # -----------------------------------------------------------------------------
-SIDO_ALIASES = {
-    '서울특별시': ['seoul', 'kr-11', '11'],
-    '부산광역시': ['busan', 'kr-26', '26'],
-    '대구광역시': ['daegu', 'kr-27', '27'],
-    '인천광역시': ['incheon', 'kr-28', '28'],
-    '광주광역시': ['gwangju', 'kr-29', '29'],
-    '대전광역시': ['daejeon', 'kr-30', '30'],
-    '울산광역시': ['ulsan', 'kr-31', '31'],
-    '세종특별자치시': ['sejong', 'kr-50', '50'],
-    '경기도': ['gyeonggi', 'kr-41', '41'],
-    '강원': ['gangwon', 'kr-42', '42'], # 강원도, 강원특별자치도 모두 대변
-    '충청북도': ['chungbuk', 'kr-43', '43'],
-    '충청남도': ['chungnam', 'kr-44', '44'],
-    '전라북도': ['jeonbuk', 'kr-45', '45'], # 전라북도, 전북특별자치도 대변
-    '전라남도': ['jeonnam', 'kr-46', '46'],
-    '경상북도': ['gyeongbuk', 'kr-47', '47'],
-    '경상남도': ['gyeongnam', 'kr-48', '48'],
-    '제주특별자치도': ['jeju', 'kr-49', '49']
-}
-
-SEOUL_DISTRICTS_ALIASES = {
-    '종로구': ['jongno', 'jongno-gu', 'jongno_gu'],
-    '중구': ['jung', 'jung-gu', 'jung_gu', 'jung_'],
-    '용산구': ['yongsan', 'yongsan-gu', 'yongsan_gu'],
-    '성동구': ['seongdong', 'seongdong-gu', 'seongdong_gu'],
-    '광진구': ['gwangjin', 'gwangjin-gu', 'gwangjin_gu'],
-    '동대문구': ['dongdaemun', 'dongdaemun-gu', 'dongdaemun_gu'],
-    '중랑구': ['jungnang', 'jungnang-gu', 'jungnang_gu'],
-    '성북구': ['seongbuk', 'seongbuk-gu', 'seongbuk_gu'],
-    '강북구': ['gangbuk', 'gangbuk-gu', 'gangbuk_gu'],
-    '도봉구': ['dobong', 'dobong-gu', 'dobong_gu'],
-    '노원구': ['nowon', 'nowon-gu', 'nowon_gu'],
-    '은평구': ['eunpyeong', 'eunpyeong-gu', 'eunpyeong_gu'],
-    '서대문구': ['seodaemun', 'seodaemun-gu', 'seodaemun_gu'],
-    '마포구': ['mapo', 'mapo-gu', 'mapo_gu'],
-    '양천구': ['yangcheon', 'yangcheon-gu', 'yangcheon_gu'],
-    '강서구': ['gangseo', 'gangseo-gu', 'gangseo_gu'],
-    '구로구': ['guro', 'guro-gu', 'guro_gu'],
-    '금천구': ['geumcheon', 'geumcheon-gu', 'geumcheon_gu'],
-    '영등포구': ['yeongdeungpo', 'yeongdeungpo-gu', 'yeongdeungpo_gu'],
-    '동작구': ['dongjak', 'dongjak-gu', 'dongjak_gu'],
-    '관악구': ['gwanak', 'gwanak-gu', 'gwanak_gu'],
-    '서초구': ['seocho', 'seocho-gu', 'seocho_gu'],
-    '강남구': ['gangnam', 'gangnam-gu', 'gangnam_gu'],
-    '송파구': ['songpa', 'songpa-gu', 'songpa_gu'],
-    '강동구': ['gangdong', 'gangdong-gu', 'gangdong_gu']
-}
-
-# -----------------------------------------------------------------------------
-# 🛠️ 지능형 한국 전국 광역 매퍼 정의 (충청, 전라 등 광역도 단위 완벽 판정)
-# -----------------------------------------------------------------------------
-def find_sido_row(alias_key, df_sido):
+def match_national_province_robust(english_id, df_sido):
+    # ID에서 대시, 언더바, do, si 등을 제거하여 소문자 통일
+    clean_id = english_id.lower().replace('-', '').replace('_', '').replace('do', '').replace('si', '').replace('special', '').strip()
+    
+    id_to_term = {
+        'kr11': '서울', '11': '서울', 'seoul': '서울',
+        'kr26': '부산', '26': '부산', 'busan': '부산',
+        'kr27': '대구', '27': '대구', 'daegu': '대구',
+        'kr28': '인천', '28': '인천', 'incheon': '인천',
+        'kr29': '광주', '29': '광주', 'gwangju': '광주',
+        'kr30': '대전', '30': '대전', 'daejeon': '대전',
+        'kr31': '울산', '31': '울산', 'ulsan': '울산',
+        'kr50': '세종', '50': 'sejong', 'sejong': '세종',
+        'kr41': '경기', '41': '경기', 'gyeonggi': '경기',
+        'kr42': '강원', '42': '강원', 'gangwon': '강원',
+        'kr43': '충북', '43': '충북', 'chungbuk': '충북', 'chungcheongbuk': '충북',
+        'kr44': '충남', '44': '충남', 'chungnam': '충남', 'chungcheongnam': '충남',
+        'kr45': '전북', '45': '전북', 'jeonbuk': '전북', 'jeollabuk': '전북',
+        'kr46': '전남', '46': '전남', 'jeonnam': '전남', 'jeollanam': '전남',
+        'kr47': '경북', '47': '경북', 'gyeongbuk': '경북', 'gyeongsangbuk': '경북',
+        'kr48': '경남', '48': '경남', 'gyeongnam': '경남', 'gyeongsangnam': '경남',
+        'kr49': '제주', '49': '제주', 'jeju': '제주'
+    }
+    
+    term = id_to_term.get(clean_id, '')
+    if not term:
+        return None
+        
     for idx, row in df_sido.iterrows():
-        reg_name = row['clean_region']
-        
-        # 1. 완전 일치
-        if alias_key == reg_name:
-            return row
-            
-        # 2. 포함 관계 일치
-        if (alias_key in reg_name) or (reg_name in alias_key):
-            return row
-            
-        # 3. 강원/전북 등 특별자치도 명칭 전수 검색 보완
-        if '강원' in alias_key and '강원' in reg_name:
-            return row
-        if '전북' in alias_key and ('전북' in reg_name or '전라북도' in reg_name):
-            return row
-        if '전라북도' in alias_key and ('전북' in reg_name or '전라북도' in reg_name):
-            return row
-            
-        # 4. 충북, 충남, 전북, 전남, 경북, 경남 축약어 보조 매칭
-        abbrevs = {
-            '충청북도': '충북', '충청남도': '충남', 
-            '전라북도': '전북', '전라남도': '전남', 
-            '경상북도': '경북', '경상남도': '경남'
-        }
-        if alias_key in abbrevs and abbrevs[alias_key] in reg_name:
-            return row
+        reg = row['clean_region']
+        if term in reg:
+            return reg
+        if term == '충북' and '충청북도' in reg:
+            return reg
+        if term == '충남' and '충청남도' in reg:
+            return reg
+        if term == '전북' and ('전라북도' in reg or '전북' in reg):
+            return reg
+        if term == '전남' and '전라남도' in reg:
+            return reg
+        if term == '경북' and '경상북도' in reg:
+            return reg
+        if term == '경남' and '경상남도' in reg:
+            return reg
             
     return None
 
-def find_seoul_district_row(district_name, df_seoul):
-    for idx, row in df_seoul.iterrows():
-        reg_name = row['clean_region']
-        if district_name in reg_name and "서울특별시" in reg_name:
-            return row
-    return None
-
 # -----------------------------------------------------------------------------
-# 5. 브라우저 렌더링용 자바스크립트 + HTML 마스터 템플릿
+# 🛠️ fixed 위치 기반 & URL 인코딩 보호막 탑재 실시간 플로팅 툴팁 HTML 래퍼
 # -----------------------------------------------------------------------------
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-    body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: transparent;
-    }
-    #streamlit-floating-tooltip {
-        position: absolute;
-        display: none;
-        background: rgba(28, 31, 38, 0.98);
-        color: #ffffff;
-        padding: 10px 14px;
-        font-size: 13px;
-        font-weight: 500;
-        border-radius: 8px;
-        pointer-events: none;
-        z-index: 10000;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        line-height: 1.5;
-        transition: opacity 0.1s ease;
-    }
-    path, polyline, polygon, rect {
-        transition: fill 0.25s ease-in-out, stroke-width 0.25s ease-in-out;
-        cursor: pointer;
-    }
-    path:hover, polyline:hover, polygon:hover, rect:hover {
-        fill-opacity: 0.8 !important;
-        stroke: #1e1e24 !important;
-        stroke-width: 3.5px !important;
-    }
-</style>
-</head>
-<body>
-    <div id="streamlit-floating-tooltip"></div>
-    __SVG_CONTENT__
-    <script>
-        const tooltipData = __JSON_DATA__;
-        const tooltip = document.getElementById('streamlit-floating-tooltip');
-        
-        const elements = document.querySelectorAll('path, polyline, polygon, rect');
-        elements.forEach(el => {
-            const rawId = el.getAttribute('id');
-            if (rawId) {
-                const normId = rawId.toLowerCase().trim();
-                const data = tooltipData[normId];
-                if (data) {
-                    // JavaScript 엔진이 인구 데이터 색상 및 테두리를 지도에 직접 드로잉
-                    el.style.fill = data.color;
-                    el.style.stroke = '#ffffff';
-                    el.style.strokeWidth = '1.5px';
-                    
-                    // 마우스 무브 트래킹 및 다크 모드 말풍선 동적 생성
-                    el.addEventListener('mouseover', (e) => {
+def wrap_svg_with_custom_tooltip(svg_soup_str):
+    html_page = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: transparent;
+        }}
+        #streamlit-floating-tooltip {{
+            position: fixed;
+            display: none;
+            background: rgba(28, 31, 38, 0.96);
+            color: #ffffff;
+            padding: 10px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 999999;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            line-height: 1.5;
+        }}
+        path, polyline, polygon {{
+            transition: fill 0.2s ease, stroke-width 0.2s ease;
+            cursor: pointer;
+        }}
+        path:hover, polyline:hover, polygon:hover {{
+            fill-opacity: 0.85 !important;
+            stroke: #1e1e24 !important;
+            stroke-width: 3.5px !important;
+        }}
+    </style>
+    </head>
+    <body>
+        <div id="streamlit-floating-tooltip"></div>
+        {svg_soup_str}
+        <script>
+            const tooltip = document.getElementById('streamlit-floating-tooltip');
+            const elements = document.querySelectorAll('path, polyline, polygon');
+            
+            elements.forEach(el => {{
+                if (el.getAttribute('data-tooltip')) {{
+                    el.addEventListener('mouseover', (e) => {{
                         tooltip.style.display = 'block';
-                        tooltip.innerHTML = `
-                            <div style="font-weight: bold; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px; margin-bottom: 4px; color: #58a6ff;">📍 ` + data.name + `</div>
-                            <div style="margin-bottom: 3px;"><b>` + data.metricLabel + `:</b> <span style="color:#ff7f0e; font-weight:bold;">` + data.value + `</span></div>
-                            <div><b>총 인구:</b> ` + data.pop + `명</div>
-                        `;
-                    });
+                        const encodedData = el.getAttribute('data-tooltip');
+                        tooltip.innerHTML = decodeURIComponent(encodedData);
+                    }});
                     
-                    el.addEventListener('mousemove', (e) => {
+                    el.addEventListener('mousemove', (e) => {{
                         let posX = e.clientX + 15;
                         let posY = e.clientY + 15;
-                        if (posX + tooltip.offsetWidth > window.innerWidth) {
+                        
+                        if (posX + tooltip.offsetWidth > window.innerWidth) {{
                             posX = e.clientX - tooltip.offsetWidth - 15;
-                        }
-                        if (posY + tooltip.offsetHeight > window.innerHeight) {
+                        }}
+                        if (posY + tooltip.offsetHeight > window.innerHeight) {{
                             posY = e.clientY - tooltip.offsetHeight - 15;
-                        }
+                        }}
+                        
                         tooltip.style.left = posX + 'px';
                         tooltip.style.top = posY + 'px';
-                    });
+                    }});
                     
-                    el.addEventListener('mouseout', () => {
+                    el.addEventListener('mouseout', () => {{
                         tooltip.style.display = 'none';
-                    });
-                }
-            }
-        });
-    </script>
-</body>
-</html>
-"""
+                    }});
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return html_page
 
 # =========================================================================
-# TAB 1: 지도 시각화 (동적 매핑 보강 및 JS 툴팁 적용)
+# TAB 1: 지도 시각화
 # =========================================================================
 with tab_map:
-    st.subheader(f"🗺️ 지도로 보는 {selected_label} 공간 분포")
-    
     map_col1, map_col2 = st.columns([7, 3])
     
-    # 색상 추출 헬퍼 함수
+    # 색상 변환 헬퍼 함수
     def get_rgb_color(val, min_v, max_v, theme):
         if max_v == min_v:
             f = 0.0
@@ -518,96 +537,115 @@ with tab_map:
     with map_col1:
         map_tab1, map_tab2 = st.tabs(["全国 대한민국 광역지도", "SEOUL 서울시 자치구 세부지도"])
         
-        # 1. 전국 지도 렌더링
+        # 전국 지도 렌더링
         with map_tab1:
             svg_national = fetch_svg("Map_of_South_Korea-blank.svg")
             if svg_national:
                 df_sido = df_metrics[df_metrics['region_level'] == 'Sido']
-                min_val = df_sido[selected_metric].min()
-                max_val = df_sido[selected_metric].max()
                 
-                # BS4는 뷰박스 크기만 100%로 가볍게 보정
-                try:
-                    soup = BeautifulSoup(svg_national, "xml")
-                    if soup.svg:
-                        soup.svg['width'] = '100%'
-                        soup.svg['height'] = '550px'
-                    svg_clean = str(soup)
-                except Exception:
-                    svg_clean = svg_national
-                
-                # 파이썬 데이터 -> 자바스크립트 맵 JSON 구조화
-                national_json_data = {}
-                for sido_name, aliases in SIDO_ALIASES.items():
-                    row = find_sido_row(sido_name, df_sido)
-                    if row is not None:
-                        val = row[selected_metric]
-                        color = get_rgb_color(val, min_val, max_val, selected_theme)
+                if df_sido.empty:
+                    st.warning("⚠️ 전국 광역지자체 데이터를 식별하지 못했습니다.")
+                else:
+                    min_val = df_sido[selected_metric].min()
+                    max_val = df_sido[selected_metric].max()
+                    
+                    try:
+                        soup = BeautifulSoup(svg_national, "xml")
+                    except Exception:
+                        soup = BeautifulSoup(svg_national, "html.parser")
                         
-                        if isinstance(val, (float, np.floating)):
-                            formatted_val = f"{val:.2f}"
-                        else:
-                            formatted_val = f"{int(val):,}"
+                    soup.svg['width'] = '100%'
+                    soup.svg['height'] = '550px'
+                    
+                    for path in soup.find_all(['path', 'polyline', 'polygon']):
+                        p_id = path.get('id')
+                        if p_id:
+                            kor_prefix = match_national_province_robust(p_id, df_sido)
                             
-                        # 별칭(Alias)으로 들어오는 모든 지도상의 ID에 완벽 매칭
-                        for alias in aliases:
-                            national_json_data[alias.lower()] = {
-                                'name': row['clean_region'],
-                                'metricLabel': selected_label,
-                                'value': formatted_val,
-                                'pop': f"{int(row['총인구']):,}",
-                                'color': color
-                            }
-                
-                # HTML 템플릿에 SVG와 데이터맵을 주입하여 송출
-                final_html = HTML_TEMPLATE.replace("__SVG_CONTENT__", svg_clean).replace("__JSON_DATA__", json.dumps(national_json_data))
-                import streamlit.components.v1 as components
-                components.html(final_html, height=570)
+                            if kor_prefix:
+                                matched_row = df_sido[df_sido['clean_region'] == kor_prefix]
+                                if matched_row is not None and not matched_row.empty:
+                                    r_data = matched_row.iloc[0]
+                                    val = r_data[selected_metric]
+                                    color = get_rgb_color(val, min_val, max_val, selected_theme)
+                                    
+                                    path['fill'] = color
+                                    path['stroke'] = '#ffffff'
+                                    path['stroke-width'] = '1.2px'
+                                    
+                                    if isinstance(val, (float, np.floating)):
+                                        formatted_val = f"{val:.2f}"
+                                    else:
+                                        formatted_val = f"{int(val):,}"
+                                        
+                                    tooltip_html = f"<div style='font-size:14px; font-weight:bold; margin-bottom:5px; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:3px; color:#58a6ff;'>📍 {r_data['clean_region']}</div><div style='margin-bottom:3px;'>🔍 <b>{selected_label}:</b> <span style='color:#ff7f0e; font-weight:bold;'>{formatted_val}</span></div><div>👥 <b>총 인구:</b> {int(r_data['총인구']):,}명</div>"
+                                    path['data-tooltip'] = urllib.parse.quote(tooltip_html)
+                                    
+                    final_html = wrap_svg_with_custom_tooltip(str(soup))
+                    import streamlit.components.v1 as components
+                    components.html(final_html, height=570)
             else:
-                st.error("국가 지도 SVG 데이터를 위키미디어에서 불러오지 못했습니다.")
+                st.error("국가 지도 SVG 로딩 실패")
                 
-        # 2. 서울 지도 렌더링
+        # 서울 지도 렌더링
         with map_tab2:
             svg_seoul = fetch_svg("Seoul_districts.svg")
             if svg_seoul:
                 df_seoul = df_metrics[df_metrics['clean_region'].str.startswith("서울특별시 ")]
-                min_val_s = df_seoul[selected_metric].min()
-                max_val_s = df_seoul[selected_metric].max()
                 
-                try:
-                    soup_s = BeautifulSoup(svg_seoul, "xml")
-                    if soup_s.svg:
-                        soup_s.svg['width'] = '100%'
-                        soup_s.svg['height'] = '550px'
-                    svg_clean_s = str(soup_s)
-                except Exception:
-                    svg_clean_s = svg_seoul
+                if df_seoul.empty:
+                    df_seoul = df_metrics[df_metrics['clean_region'].str.contains("구") & ~df_metrics['clean_region'].str.contains("시 ")]
                 
-                seoul_json_data = {}
-                for district_name, aliases in SEOUL_DISTRICTS_ALIASES.items():
-                    row = find_seoul_district_row(district_name, df_seoul)
-                    if row is not None:
-                        val = row[selected_metric]
-                        color = get_rgb_color(val, min_val_s, max_val_s, selected_theme)
+                if df_seoul.empty:
+                    st.warning("⚠️ 서울 자치구 데이터를 식별하지 못했습니다.")
+                else:
+                    min_val_s = df_seoul[selected_metric].min()
+                    max_val_s = df_seoul[selected_metric].max()
+                    
+                    try:
+                        soup_s = BeautifulSoup(svg_seoul, "xml")
+                    except Exception:
+                        soup_s = BeautifulSoup(svg_seoul, "html.parser")
                         
-                        if isinstance(val, (float, np.floating)):
-                            formatted_val = f"{val:.2f}"
-                        else:
-                            formatted_val = f"{int(val):,}"
+                    soup_s.svg['width'] = '100%'
+                    soup_s.svg['height'] = '550px'
+                    
+                    seoul_id_mapping = {
+                        'jongno': '종로구', 'jung': '중구', 'yongsan': '용산구', 'seongdong': '성동구', 'gwangjin': '광진구',
+                        'dongdaemun': '동대문구', 'jungnang': '중랑구', 'seongbuk': '성북구', 'gangbuk': '강북구', 'dobong': '도봉구',
+                        'nowon': '노원구', 'eunpyeong': '은평구', 'seodaemun': '서대문구', 'mapo': '마포구', 'yangcheon': '양천구',
+                        'gangseo': '강서구', 'guro': '구로구', 'geumcheon': '금천구', 'yeongdeungpo': '영등포구', 'dongjak': '동작구',
+                        'gwanak': '관악구', 'seocho': '서초구', 'gangnam': '강남구', 'songpa': '송파구', 'gangdong': '강동구'
+                    }
+                    
+                    for path in soup_s.find_all(['path', 'polygon', 'polyline']):
+                        p_id = path.get('id')
+                        if p_id:
+                            clean_id = p_id.lower().replace('-gu', '').replace('_gu', '').strip()
+                            kor_district = seoul_id_mapping.get(clean_id, '')
                             
-                        for alias in aliases:
-                            seoul_json_data[alias.lower()] = {
-                                'name': row['clean_region'],
-                                'metricLabel': selected_label,
-                                'value': formatted_val,
-                                'pop': f"{int(row['총인구']):,}",
-                                'color': color
-                            }
-                
-                final_html_s = HTML_TEMPLATE.replace("__SVG_CONTENT__", svg_clean_s).replace("__JSON_DATA__", json.dumps(seoul_json_data))
-                components.html(final_html_s, height=570)
+                            matched_row = df_seoul[df_seoul['clean_region'].str.contains(kor_district)] if kor_district else None
+                            if matched_row is not None and not matched_row.empty:
+                                r_data = matched_row.iloc[0]
+                                val = r_data[selected_metric]
+                                color = get_rgb_color(val, min_val_s, max_val_s, selected_theme)
+                                
+                                path['fill'] = color
+                                path['stroke'] = '#ffffff'
+                                path['stroke-width'] = '1.5px'
+                                
+                                if isinstance(val, (float, np.floating)):
+                                    formatted_val = f"{val:.2f}"
+                                else:
+                                    formatted_val = f"{int(val):,}"
+                                    
+                                tooltip_html_s = f"<div style='font-size:14px; font-weight:bold; margin-bottom:5px; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:3px; color:#58a6ff;'>📍 {r_data['clean_region']}</div><div style='margin-bottom:3px;'>🔍 <b>{selected_label}:</b> <span style='color:#ff7f0e; font-weight:bold;'>{formatted_val}</span></div><div>👥 <b>총 인구:</b> {int(r_data['총인구']):,}명</div>"
+                                path['data-tooltip'] = urllib.parse.quote(tooltip_html_s)
+                                
+                    final_html_s = wrap_svg_with_custom_tooltip(str(soup_s))
+                    components.html(final_html_s, height=570)
             else:
-                st.error("서울 지도 SVG 데이터를 위키미디어에서 불러오지 못했습니다.")
+                st.error("서울 지도 SVG 로딩 실패")
                 
     with map_col2:
         st.markdown(f"### 🎨 지도 범례 ({selected_label})")
@@ -632,29 +670,6 @@ with tab_map:
         st.markdown("---")
         st.markdown("🔍 **지도를 분석하는 팁:**")
         st.info("지도 속 마우스를 구역 위에 올려두면 행정구역 명칭과 정확한 수치 정보를 말풍선 팝업으로 확인할 수 있습니다.")
-        
-        # ---------------------------------------------------------------------
-        # 🛠️ 지도의 무결성 보장을 위한 매핑 사전 진단 판판넬 배치
-        # ---------------------------------------------------------------------
-        with st.expander("🛠️ 데이터 매핑 진단 정보 (Diagnostics)"):
-            st.markdown("지도가 올바르게 표시되는지 매핑 로그를 확인해 보세요.")
-            col_d1, col_d2 = st.columns(2)
-            with col_d1:
-                st.markdown("**전국 광역시도 매핑 상태:**")
-                diag_data = []
-                for s_name, s_aliases in SIDO_ALIASES.items():
-                    s_row = find_sido_row(s_name, df_sido)
-                    status = "✅ 성공" if s_row is not None else "❌ 누락"
-                    diag_data.append({"행정구역": s_name, "상태": status})
-                st.dataframe(pd.DataFrame(diag_data), use_container_width=True, hide_index=True)
-            with col_d2:
-                st.markdown("**서울시 자치구 매핑 상태:**")
-                diag_seoul = []
-                for d_name, d_aliases in SEOUL_DISTRICTS_ALIASES.items():
-                    d_row = find_seoul_district_row(d_name, df_seoul)
-                    status = "✅ 성공" if d_row is not None else "❌ 누락"
-                    diag_seoul.append({"자치구": d_name, "상태": status})
-                st.dataframe(pd.DataFrame(diag_seoul), use_container_width=True, hide_index=True)
 
 # =========================================================================
 # TAB 2: 세부 연령 구조 (인구 피라미드 & 3대 그룹)
