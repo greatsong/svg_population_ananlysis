@@ -338,11 +338,31 @@ with tab_map:
                 style.string = "path, polyline { transition: fill 0.3s; cursor:pointer; } path:hover, polyline:hover { fill-opacity: 0.8 !important; stroke: #333 !important; stroke-width: 2.5px !important; }"
                 soup.svg.insert(0, style)
                 
+                # 신구버전 통합 ID 맵 (최신 ISO/지역 코드 매핑 테이블 완벽 보강)
                 id_mapping = {
+                    # 구형 영문 텍스트 ID
                     'seoul': '서울', 'busan': '부산', 'daegu': '대구', 'incheon': '인천', 'gwangju': '광주',
                     'daejeon': '대전', 'ulsan': '울산', 'sejong': '세종', 'gyeonggi': '경기', 'gangwon': '강원',
                     'chungbuk': '충북', 'chungnam': '충남', 'jeonbuk': '전북', 'jeonnam': '전남', 'gyeongbuk': '경북',
-                    'gyeongnam': '경남', 'jeju': '제주'
+                    'gyeongnam': '경남', 'jeju': '제주',
+                    # 신형 ISO 3166-2:KR 및 숫자 ID 매칭 추가
+                    'kr-11': '서울', '11': '서울',
+                    'kr-26': '부산', '26': '부산',
+                    'kr-27': '대구', '27': '대구',
+                    'kr-28': '인천', '28': '인천',
+                    'kr-29': '광주', '29': '광주',
+                    'kr-30': '대전', '30': '대전',
+                    'kr-31': '울산', '31': '울산',
+                    'kr-50': '세종', '50': '세종',
+                    'kr-41': '경기', '41': '경기',
+                    'kr-42': '강원', '42': '강원',
+                    'kr-43': '충북', '43': '충북',
+                    'kr-44': '충남', '44': '충남',
+                    'kr-45': '전북', '45': '전북',
+                    'kr-46': '전남', '46': '전남',
+                    'kr-47': '경북', '47': '경북',
+                    'kr-48': '경남', '48': '경남',
+                    'kr-49': '제주', '49': '제주'
                 }
                 
                 for path in soup.find_all(['path', 'polyline']):
@@ -361,7 +381,7 @@ with tab_map:
                             path['stroke'] = '#ffffff'
                             path['stroke-width'] = '1.2px'
                             
-                            # 포맷팅 버그 우회 처리 (안전하게 문자열 변환 수행)
+                            # 포맷팅 안전 변환 처리
                             if isinstance(val, (float, np.floating)):
                                 formatted_val = f"{val:.2f}"
                             else:
@@ -369,7 +389,9 @@ with tab_map:
                                 
                             tooltip = soup.new_tag("title")
                             tooltip.string = f"{r_data['clean_region']}\n- {selected_label}: {formatted_val}"
-                            path.append(tooltip)
+                            
+                            # [핵심수정] append 대신 insert(0, ...)를 사용하여 가장 첫 자식으로 추가 (툴팁 활성화)
+                            path.insert(0, tooltip)
                             
                 import streamlit.components.v1 as components
                 components.html(str(soup), height=570)
@@ -404,7 +426,7 @@ with tab_map:
                     'gwanak': '관악구', 'seocho': '서초구', 'gangnam': '강남구', 'songpa': '송파구', 'gangdong': '강동구'
                 }
                 
-                for path in soup_s.find_all('path'):
+                for path in soup_s.find_all(['path', 'polygon', 'polyline']):
                     p_id = path.get('id')
                     if p_id:
                         clean_id = p_id.lower().replace('-gu', '').replace('_gu', '').strip()
@@ -420,7 +442,7 @@ with tab_map:
                             path['stroke'] = '#ffffff'
                             path['stroke-width'] = '1.5px'
                             
-                            # 포맷팅 버그 우회 처리
+                            # 포맷팅 안전 변환 처리
                             if isinstance(val, (float, np.floating)):
                                 formatted_val = f"{val:.2f}"
                             else:
@@ -428,7 +450,9 @@ with tab_map:
                                 
                             tooltip = soup_s.new_tag("title")
                             tooltip.string = f"{r_data['clean_region']}\n- {selected_label}: {formatted_val}"
-                            path.append(tooltip)
+                            
+                            # [핵심수정] append 대신 insert(0, ...)를 사용하여 가장 첫 자식으로 추가 (툴팁 활성화)
+                            path.insert(0, tooltip)
                             
                 components.html(str(soup_s), height=570)
             else:
@@ -464,7 +488,6 @@ with tab_map:
 with tab_pyramid:
     st.subheader(f"📊 {selected_region} 세부 연령 분석")
     
-    # 피라미드 가동이 가능한지(가상 시뮬레이션 상태인지 확인)
     if reg_data['raw_row'] is None:
         st.warning("⚠️ CSV 인구 데이터 원본 파일이 비어 있어 피라미드 분석을 연동할 수 없습니다. 행안부 원본 파일을 드롭해 주세요.")
     else:
